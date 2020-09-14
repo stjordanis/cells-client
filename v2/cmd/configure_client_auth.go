@@ -39,12 +39,12 @@ You can also go through the whole process in a non-interactive manner by using t
 	Run: func(cm *cobra.Command, args []string) {
 
 		var err error
-		newConf := &cells_sdk.SdkConfig{}
+		newConf := &rest.CecConfig{}
 
 		if notEmpty(configHost) == nil && notEmpty(configUser) == nil && notEmpty(configPwd) == nil {
-			err = nonInteractive(newConf)
+			err = nonInteractive(&newConf.SdkConfig)
 		} else {
-			err = interactive(newConf)
+			err = interactive(&newConf.SdkConfig)
 		}
 		if err != nil {
 			log.Fatal(err)
@@ -57,12 +57,12 @@ You can also go through the whole process in a non-interactive manner by using t
 			}
 		}
 		filePath := rest.GetConfigFilePath()
-		data, _ := json.Marshal(newConf)
+		data, _ := json.MarshalIndent(newConf, "", "\t")
 		err = ioutil.WriteFile(filePath, data, 0600)
 		if err != nil {
 			fmt.Println(promptui.IconBad + " Cannot save configuration file! " + err.Error())
 		} else {
-			fmt.Printf("%s Configuration saved, you can now use the client to interract with %s.\n", promptui.IconGood, newConf.Url)
+			fmt.Printf("%s Configuration saved, you can now use the client to interact with %s.\n", promptui.IconGood, newConf.Url)
 		}
 	},
 }
@@ -108,11 +108,11 @@ func interactive(newConf *cells_sdk.SdkConfig) error {
 
 	// Test a simple PING with this config before saving
 	fmt.Println(promptui.IconWarn + " Testing this configuration before saving")
-	rest.DefaultConfig = newConf
+	rest.DefaultConfig.SdkConfig = *newConf
 	if _, _, e := rest.GetApiClient(); e != nil {
 		fmt.Println("\r" + promptui.IconBad + " Could not connect to server, please recheck your configuration")
 		fmt.Println("Cause: " + e.Error())
-		return fmt.Errorf("Test connection failed.")
+		return fmt.Errorf("test connection failed")
 	}
 	fmt.Println("\r" + promptui.IconGood + " Successfully logged to server")
 	return nil
@@ -131,7 +131,7 @@ func nonInteractive(conf *cells_sdk.SdkConfig) error {
 	}
 
 	// Test a simple ping with this config before saving
-	rest.DefaultConfig = conf
+	rest.DefaultConfig.SdkConfig = *conf
 	if _, _, e := rest.GetApiClient(); e != nil {
 		return fmt.Errorf("Could not connect to newly configured server failed, cause: %s", e.Error())
 	}

@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -14,16 +15,22 @@ import (
 	"github.com/go-openapi/strfmt"
 	"github.com/shibukawa/configdir"
 
-	"github.com/pydio/cells-client/v2/common"
 	cells_sdk "github.com/pydio/cells-sdk-go"
 	"github.com/pydio/cells-sdk-go/client"
 	"github.com/pydio/cells-sdk-go/transport"
+
+	"github.com/pydio/cells-client/v2/common"
 )
 
 var (
-	DefaultConfig  *cells_sdk.SdkConfig
+	DefaultConfig  *CecConfig
 	configFilePath string
 )
+
+type CecConfig struct {
+	cells_sdk.SdkConfig
+	TokenUser string
+}
 
 func GetConfigFilePath() string {
 	if configFilePath != "" {
@@ -68,7 +75,7 @@ func GetApiClient(anonymous ...bool) (context.Context, *client.PydioCellsRest, e
 		anon = true
 	}
 	DefaultConfig.CustomHeaders = map[string]string{"User-Agent": "cells-client/" + common.Version}
-	c, t, e := transport.GetRestClientTransport(DefaultConfig, anon)
+	c, t, e := transport.GetRestClientTransport(&DefaultConfig.SdkConfig, anon)
 	if e != nil {
 		return nil, nil, e
 	}
@@ -84,58 +91,67 @@ func GetApiClient(anonymous ...bool) (context.Context, *client.PydioCellsRest, e
 //  2) config files whose path is passed as argument of the start command
 //  3) local config file (that are generated at first start with one of the 2 options above OR by calling the configure command.
 func SetUpEnvironment(confPath string) error {
+
+	DefaultConfig = new(CecConfig)
 	// Use a config file
 	if confPath != "" {
 		SetConfigFilePath(confPath)
 	}
 
+	cecCfg := new(CecConfig)
 	// Get config params from environment variables
 	c, err := getSdkConfigFromEnv()
 	if err != nil {
 		return err
 	}
+	cecCfg.SdkConfig = c
+
+	l, err := GetConfigList()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	if c.Url == "" {
+		cecCfg = l.GetActiveConfig()
 
-		confPath = GetConfigFilePath()
-		s, err := ioutil.ReadFile(confPath)
+		// Retrieves sensible info from the keyring if one is presente
+		err = ConfigFromKeyring(cecCfg)
 		if err != nil {
 			return err
 		}
-		err = json.Unmarshal(s, &c)
-		if err != nil {
-			return err
-		}
-		// Retrieves sensible info from the keyring if one is present
-		ConfigFromKeyring(&c)
 
 		// Refresh token if required
-		if refreshed, err := RefreshIfRequired(&c); refreshed {
+		if refreshed, err := RefreshIfRequired(&cecCfg.SdkConfig); refreshed {
 			if err != nil {
 				log.Fatal("Could not refresh authentication token:", err)
 			}
-			// Copy config as IdToken will be cleared
-			storeConfig := c
-			ConfigToKeyring(&storeConfig)
+			// Copy config as IdToken will be cleared and kept inside the keyring
+			storeConfig := cecCfg
+			err = ConfigToKeyring(storeConfig)
+			if err != nil {
+				return err
+			}
+
+			l.updateActiveConfig(storeConfig)
 			// Save config to renew TokenExpireAt
-			confData, _ := json.Marshal(&storeConfig)
-			ioutil.WriteFile(confPath, confData, 0666)
+			if err := l.SaveConfigFile(); err != nil {
+				return err
+			}
 		}
 	}
 
 	// Store the retrieved parameters in a public static singleton
-	DefaultConfig = &c
-
+	DefaultConfig = cecCfg
 	return nil
 }
 
 var refreshMux = &sync.Mutex{}
 
-func RefreshAndStoreIfRequired(c *cells_sdk.SdkConfig) bool {
+func RefreshAndStoreIfRequired(c *CecConfig) bool {
 	refreshMux.Lock()
 	defer refreshMux.Unlock()
 
-	refreshed, err := RefreshIfRequired(c)
+	refreshed, err := RefreshIfRequired(&c.SdkConfig)
 	if err != nil {
 		log.Fatal("Could not refresh authentication token:", err)
 	}
@@ -144,7 +160,7 @@ func RefreshAndStoreIfRequired(c *cells_sdk.SdkConfig) bool {
 		storeConfig := *c
 		ConfigToKeyring(&storeConfig)
 		// Save config to renew TokenExpireAt
-		confData, _ := json.Marshal(&storeConfig)
+		confData, _ := json.MarshalIndent(&storeConfig, "", "\t")
 		ioutil.WriteFile(GetConfigFilePath(), confData, 0600)
 	}
 
@@ -201,45 +217,33 @@ func getS3ConfigFromSdkConfig(sConf cells_sdk.SdkConfig) cells_sdk.S3Config {
 	return c
 }
 
-// func getS3ConfigFromEnv() (cells_sdk.S3Config, error) {
+// GetConfigList retrieves the current configurations stored in the config.json file
+func GetConfigList() (*ConfigList, error) {
+	// assuming they are located in the default folder
+	data, err := ioutil.ReadFile(GetConfigFilePath())
+	if err != nil {
+		return nil, err
+	}
 
-// 	var c cells_sdk.S3Config
+	cfg := &ConfigList{}
+	err = json.Unmarshal(data, cfg)
+	if err == nil {
+		return cfg, nil
+	}
 
-// 	// check presence of Env variable
-// 	endpoint := os.Getenv(KeyS3Endpoint)
-// 	region := os.Getenv(KeyS3Region)
-// 	bucket := os.Getenv(KeyS3Bucket)
-// 	apiKey := os.Getenv(KeyS3ApiKey)
-// 	apiSecret := os.Getenv(KeyS3ApiSecret)
-// 	usePSHStr := os.Getenv(KeyS3UsePydioSpecificHeader)
-// 	if usePSHStr == "" {
-// 		usePSHStr = "false"
-// 	}
-// 	usePSH, err := strconv.ParseBool(usePSHStr)
-// 	if err != nil {
-// 		return c, err
-// 	}
+	var oldConf *cells_sdk.SdkConfig
+	if err = json.Unmarshal(data, &oldConf); err != nil {
+		return nil, fmt.Errorf("unknown config format: %s", err)
+	}
+	// cfg = new(ConfigList)
+	defaultLabel := "default"
+	cfg.ActiveConfig = defaultLabel
+	cfg = &ConfigList{
+		Configs: map[string]*CecConfig{"default": {
+			SdkConfig: *oldConf,
+		}},
+		ActiveConfig: defaultLabel,
+	}
 
-// 	isDebugStr := os.Getenv(KeyS3IsDebug)
-// 	if isDebugStr == "" {
-// 		isDebugStr = "false"
-// 	}
-// 	isDebug, err := strconv.ParseBool(isDebugStr)
-// 	if err != nil {
-// 		return c, err
-// 	}
-
-// 	if !(len(endpoint) > 0 && len(region) > 0 && len(bucket) > 0 && len(apiKey) > 0 && len(apiSecret) > 0) {
-// 		return c, nil
-// 	}
-
-// 	c.Endpoint = endpoint
-// 	c.Region = region
-// 	c.Bucket = bucket
-// 	c.ApiKey = apiKey
-// 	c.ApiSecret = apiSecret
-// 	c.UsePydioSpecificHeader = usePSH
-// 	c.IsDebug = isDebug
-
-// 	return c, nil
-// }
+	return cfg, nil
+}

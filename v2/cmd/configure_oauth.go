@@ -2,9 +2,7 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
@@ -18,8 +16,6 @@ import (
 	"github.com/skratchdot/open-golang/open"
 	"github.com/spf13/cobra"
 
-	cells_sdk "github.com/pydio/cells-sdk-go"
-
 	"github.com/pydio/cells-client/v2/rest"
 )
 
@@ -29,8 +25,7 @@ var (
 	oAuthUrl        string
 	oAuthIdToken    string
 	oAuthSkipVerify bool
-
-	callbackPort = 3000
+	callbackPort    = 3000
 )
 
 type oAuthHandler struct {
@@ -50,15 +45,22 @@ var configureOAuthCmd = &cobra.Command{
 	Run: func(cm *cobra.Command, args []string) {
 
 		var err error
-		newConf := &cells_sdk.SdkConfig{}
+		var label string
+		newConf := &rest.CecConfig{}
+
+		list, err := rest.GetConfigList()
+		if err != nil {
+			list = &rest.ConfigList{Configs: map[string]*rest.CecConfig{}}
+		}
 
 		if oAuthUrl != "" && oAuthIdToken != "" {
-			err = oAuthNonInteractive(newConf)
+			if newConf, label, err = oAuthNonInteractive(list); err != nil {
+				log.Fatal(err)
+			}
 		} else {
-			err = oAuthInteractive(newConf)
-		}
-		if err != nil {
-			log.Fatal(err)
+			if newConf, label, err = oAuthInteractive(list); err != nil {
+				log.Fatal(err)
+			}
 		}
 
 		// Now save config!
@@ -67,14 +69,25 @@ var configureOAuthCmd = &cobra.Command{
 				fmt.Println(promptui.IconWarn + " Cannot save token in keyring! " + err.Error())
 			}
 		}
-		filePath := rest.GetConfigFilePath()
-		data, _ := json.Marshal(newConf)
-		err = ioutil.WriteFile(filePath, data, 0644)
-		if err != nil {
+
+		// add config to the list
+		if err = list.Add(label, newConf); err != nil {
+			log.Fatal(err)
+		}
+
+		if err := list.SaveConfigFile(); err != nil {
 			fmt.Println(promptui.IconBad + " Cannot save configuration file! " + err.Error())
 		} else {
-			fmt.Printf("%s Configuration saved, you can now use the client to interract with %s.\n", promptui.IconGood, newConf.Url)
+			fmt.Printf("%s Configuration saved, you can now use the client to interact with %s.\n", promptui.IconGood, newConf.Url)
 		}
+		// filePath := rest.GetConfigFilePath()
+		// data, _ := json.MarshalIndent(newConf, "", "\t")
+		// err = ioutil.WriteFile(filePath, data, 0644)
+		// if err != nil {
+		// 	fmt.Println(promptui.IconBad + " Cannot save configuration file! " + err.Error())
+		// } else {
+		// 	fmt.Printf("%s Configuration saved, you can now use the client to interact with %s.\n", promptui.IconGood, newConf.Url)
+		// }
 	},
 }
 
@@ -115,8 +128,9 @@ func RandString(n int) string {
 	return string(b)
 }
 
-func oAuthInteractive(newConf *cells_sdk.SdkConfig) error {
+func oAuthInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, configLabel string, err error) {
 	var e error
+	newConf = &rest.CecConfig{}
 	// PROMPT URL
 	p := promptui.Prompt{
 		Label:    "Server Address (provide a valid URL)",
@@ -125,13 +139,13 @@ func oAuthInteractive(newConf *cells_sdk.SdkConfig) error {
 	}
 
 	if newConf.Url, e = p.Run(); e != nil {
-		return e
+		return nil, "", e
 	} else {
 		newConf.Url = strings.Trim(newConf.Url, " ")
 	}
 	u, e := url.Parse(newConf.Url)
 	if e != nil {
-		return e
+		return nil, "", e
 	}
 	if u.Scheme == "https" {
 		// PROMPT SKIP VERIFY
@@ -152,7 +166,7 @@ func oAuthInteractive(newConf *cells_sdk.SdkConfig) error {
 			AllowEdit: true,
 		}
 		if newConf.ClientKey, e = p.Run(); e != nil {
-			return e
+			return nil, "", e
 		}
 		p = promptui.Prompt{Label: "OAuth APP Secret (leave empty for a public client)", Default: "", Mask: '*'}
 		newConf.ClientSecret, _ = p.Run()
@@ -215,26 +229,67 @@ func oAuthInteractive(newConf *cells_sdk.SdkConfig) error {
 	}
 
 	fmt.Println(promptui.IconGood + " Now exchanging the code for a valid IdToken")
-	if err := rest.OAuthExchangeCode(newConf, returnCode, callbackUrl); err != nil {
+	if err := rest.OAuthExchangeCode(&newConf.SdkConfig, returnCode, callbackUrl); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println(promptui.IconGood + " Successfully Received Token!")
 
 	// Test a simple PING with this config before saving!
 	fmt.Println(promptui.IconWarn + " Testing this configuration before saving")
-	rest.DefaultConfig = newConf
+	rest.DefaultConfig = &rest.CecConfig{
+		SdkConfig: newConf.SdkConfig,
+	}
 	if _, _, e := rest.GetApiClient(); e != nil {
 		fmt.Println("\r" + promptui.IconBad + " Could not connect to server, please recheck your configuration")
 		fmt.Printf("Id_token: [%s]\n", newConf.IdToken)
 
 		fmt.Println("Cause: " + e.Error())
-		return fmt.Errorf("test connection failed")
+		return nil, "", fmt.Errorf("test connection failed")
 	}
 	fmt.Println("\r" + promptui.IconGood + fmt.Sprintf(" Successfully logged to server, token will be refreshed at %v", time.Unix(int64(newConf.TokenExpiresAt), 0)))
 	bold := color.New(color.Bold)
 
 	fmt.Println("\r"+promptui.IconGood+" "+"You are logged-in as user:", bold.Sprintf("%s", rest.CurrentUser))
-	return nil
+	newConf.TokenUser = rest.CurrentUser
+
+	configLabel = "default"
+
+	var found bool
+	if currentList != nil && currentList.Configs != nil {
+		for k, v := range currentList.Configs {
+			if v.Url == newConf.Url && v.TokenUser == newConf.TokenUser {
+				configLabel = k
+				found = true
+				break
+			}
+		}
+		if !found {
+			var i int
+			for {
+				if i > 0 {
+					configLabel = fmt.Sprintf("default-%d", i)
+				}
+				if _, ok := currentList.Configs[configLabel]; !ok {
+					break
+				}
+				i++
+			}
+		}
+	}
+
+	if found {
+		return newConf, configLabel, nil
+	}
+	p4 := promptui.Select{Label: fmt.Sprintf("Would you like to use this default label - %s", bold.Sprint(configLabel)), Items: []string{"Yes", "No"}, Size: 2}
+	if _, y, err := p4.Run(); y == "No" && err == nil {
+		p5 := promptui.Prompt{Label: "Enter the new label for the config"}
+		configLabel, err = p5.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	return newConf, configLabel, nil
 }
 
 func isPortAvailable(port int, timeout int) bool {
@@ -246,24 +301,26 @@ func isPortAvailable(port int, timeout int) bool {
 	return true
 }
 
-func oAuthNonInteractive(conf *cells_sdk.SdkConfig) error {
-
+func oAuthNonInteractive(currentList *rest.ConfigList) (conf *rest.CecConfig, label string, err error) {
+	conf = &rest.CecConfig{}
 	conf.Url = oAuthUrl
 	conf.IdToken = oAuthIdToken
 	conf.SkipVerify = configSkipVerify
 
 	// Insure values are legal
-	if err := validUrl(conf.Url); err != nil {
-		return fmt.Errorf("URL %s is not valid: %s", conf.Url, err.Error())
+	if err = validUrl(conf.Url); err != nil {
+		err = fmt.Errorf("URL %s is not valid: %s", conf.Url, err.Error())
+		return
 	}
 
 	// Test a simple PING with this config before saving!
-	rest.DefaultConfig = conf
+	rest.DefaultConfig.SdkConfig = conf.SdkConfig
 	if _, _, e := rest.GetApiClient(); e != nil {
-		return fmt.Errorf("test connection to newly configured server failed")
+		err = fmt.Errorf("test connection to newly configured server failed")
+		return
 	}
 	conf.User = rest.CurrentUser
-	return nil
+	return
 }
 
 func init() {

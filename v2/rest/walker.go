@@ -87,14 +87,14 @@ func NewTarget(target string, source *CrawlNode, rename bool) *CrawlNode {
 		FullPath: target,
 		RelPath:  "",
 	}
-	// For dirs, add source directory name, if we are not in the rename case:
+	// For dirs, Add source directory name, if we are not in the rename case:
 	// in such case, target is already the full target path.
 	if source.IsDir && !rename {
 		c.FullPath = c.Join(c.FullPath, source.Base())
 	}
 
 	// Manage rename corner case for files:
-	// we remove last part of the path that is the target file name
+	// we Remove last part of the path that is the target file name
 	if rename && !source.IsDir {
 		// We must compute NewFileName first because it relies on the FullPath that is then impacted
 		c.NewFileName = c.Base()
@@ -391,7 +391,7 @@ func (b *BarsPool) Done() {
 	}
 	b.nodesBar.Incr()
 	if b.nodesBar.Current() == b.nodesBar.Total {
-		// Finished, remove all bars
+		// Finished, Remove all bars
 		b.Bars = []*uiprogress.Bar{b.nodesBar}
 	}
 }

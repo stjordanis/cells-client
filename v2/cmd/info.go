@@ -19,7 +19,7 @@ Displays the current active config, show the users and the cells instance
 
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"Login", "URL"})
-		table.Append([]string{rest.DefaultConfig.User, rest.DefaultConfig.Url})
+		table.Append([]string{rest.DefaultConfig.TokenUser, rest.DefaultConfig.Url})
 		table.Render()
 
 	},
