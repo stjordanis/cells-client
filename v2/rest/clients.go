@@ -74,6 +74,9 @@ func GetApiClient(anonymous ...bool) (context.Context, *client.PydioCellsRest, e
 	if len(anonymous) > 0 && anonymous[0] {
 		anon = true
 	}
+	if DefaultConfig.IdToken == "" || DefaultConfig.RefreshToken == "" {
+		return nil, nil, fmt.Errorf("refresh length[%d] or id token length[%d] are empty", len(DefaultConfig.RefreshToken), len(DefaultConfig.IdToken))
+	}
 	DefaultConfig.CustomHeaders = map[string]string{"User-Agent": "cells-client/" + common.Version}
 	c, t, e := transport.GetRestClientTransport(&DefaultConfig.SdkConfig, anon)
 	if e != nil {
@@ -114,25 +117,26 @@ func SetUpEnvironment(confPath string) error {
 	if c.Url == "" {
 		cecCfg = l.GetActiveConfig()
 
-		// Retrieves sensible info from the keyring if one is presente
+		// Retrieves sensible info from the keyring if one is present
 		err = ConfigFromKeyring(cecCfg)
 		if err != nil {
 			return err
 		}
 
 		// Refresh token if required
-		if refreshed, err := RefreshIfRequired(&cecCfg.SdkConfig); refreshed {
+		if refreshed, err := RefreshIfRequired(cecCfg); refreshed {
 			if err != nil {
 				log.Fatal("Could not refresh authentication token:", err)
 			}
 			// Copy config as IdToken will be cleared and kept inside the keyring
-			storeConfig := cecCfg
-			err = ConfigToKeyring(storeConfig)
+			var storeConfig CecConfig
+			storeConfig = *cecCfg
+			err = ConfigToKeyring(&storeConfig)
 			if err != nil {
 				return err
 			}
 
-			l.updateActiveConfig(storeConfig)
+			l.updateActiveConfig(&storeConfig)
 			// Save config to renew TokenExpireAt
 			if err := l.SaveConfigFile(); err != nil {
 				return err
@@ -151,7 +155,7 @@ func RefreshAndStoreIfRequired(c *CecConfig) bool {
 	refreshMux.Lock()
 	defer refreshMux.Unlock()
 
-	refreshed, err := RefreshIfRequired(&c.SdkConfig)
+	refreshed, err := RefreshIfRequired(c)
 	if err != nil {
 		log.Fatal("Could not refresh authentication token:", err)
 	}
