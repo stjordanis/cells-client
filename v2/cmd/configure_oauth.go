@@ -80,14 +80,6 @@ var configureOAuthCmd = &cobra.Command{
 		} else {
 			fmt.Printf("%s Configuration saved, you can now use the client to interact with %s.\n", promptui.IconGood, newConf.Url)
 		}
-		// filePath := rest.GetConfigFilePath()
-		// data, _ := json.MarshalIndent(newConf, "", "\t")
-		// err = ioutil.WriteFile(filePath, data, 0644)
-		// if err != nil {
-		// 	fmt.Println(promptui.IconBad + " Cannot save configuration file! " + err.Error())
-		// } else {
-		// 	fmt.Printf("%s Configuration saved, you can now use the client to interact with %s.\n", promptui.IconGood, newConf.Url)
-		// }
 	},
 }
 
@@ -229,7 +221,7 @@ func oAuthInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, co
 	}
 
 	fmt.Println(promptui.IconGood + " Now exchanging the code for a valid IdToken")
-	if err := rest.OAuthExchangeCode(&newConf.SdkConfig, returnCode, callbackUrl); err != nil {
+	if err := rest.OAuthExchangeCode(newConf, returnCode, callbackUrl); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println(promptui.IconGood + " Successfully Received Token!")
