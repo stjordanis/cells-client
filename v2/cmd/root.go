@@ -36,7 +36,7 @@ This will guide you through a quick procedure to get you up and ready in no time
 
 		switch os.Args[1] {
 		// These command and respective children do not need an already configured environment
-		case "help", "configure", "version", "completion", "oauth", "clear", "doc", "update", "config":
+		case "help", "configure", "version", "completion", "oauth", "clear", "doc", "update", "config", "info":
 			break
 		default:
 			e := rest.SetUpEnvironment(configFile)
