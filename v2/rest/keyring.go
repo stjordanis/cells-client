@@ -16,8 +16,8 @@ const (
 
 func BuildKeyName(conf *CecConfig, clientType string) string {
 	parsedURL, _ := url.Parse(conf.Url)
-	// expecting name to look like this https://username@cells-test.your-files-your-rules.eu/::IdToken
-	return fmt.Sprintf("%s://%s@%s::%s", parsedURL.Scheme, conf.TokenUser, parsedURL.Host, clientType)
+	// expecting name to look like this <username>@<host>/::IdToken
+	return fmt.Sprintf("%s@%s::%s", conf.TokenUser, parsedURL.Host, clientType)
 }
 
 // ConfigToKeyring tries to store tokens in local keychain and Remove them from the conf
