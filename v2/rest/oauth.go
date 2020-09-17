@@ -7,10 +7,10 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
-	cells_sdk "github.com/pydio/cells-sdk-go"
 	"gopkg.in/square/go-jose.v2/jwt"
 )
 
@@ -50,7 +50,7 @@ func OAuthPrepareUrl(serverUrl, clientId, clientSecret, state string, browser bo
 }
 
 // OAuthExchangeCode gets an OAuth code and retrieves an AccessToken/RefreshToken pair. It updates the passed Conf
-func OAuthExchangeCode(c *cells_sdk.SdkConfig, code, callbackUrl string) error {
+func OAuthExchangeCode(c *CecConfig, code, callbackUrl string) error {
 	tokenURL, _ := url.Parse(c.Url)
 	tokenURL.Path = "/oidc/oauth2/token"
 	values := url.Values{}
@@ -88,7 +88,7 @@ func OAuthExchangeCode(c *cells_sdk.SdkConfig, code, callbackUrl string) error {
 }
 
 // RefreshIfRequired refreshes the token inside the given conf if required.
-func RefreshIfRequired(conf *cells_sdk.SdkConfig) (bool, error) {
+func RefreshIfRequired(conf *CecConfig) (bool, error) {
 	// No token to refresh
 	if conf.IdToken == "" || conf.RefreshToken == "" || conf.TokenExpiresAt == 0 {
 		return false, nil
@@ -105,7 +105,10 @@ func RefreshIfRequired(conf *cells_sdk.SdkConfig) (bool, error) {
 	}
 	data.Add("refresh_token", conf.RefreshToken)
 	data.Add("scope", "openid email profile pydio offline")
-	httpReq, err := http.NewRequest("POST", conf.Url+"/oidc/oauth2/token", strings.NewReader(data.Encode()))
+	parsed, _ := url.Parse(conf.Url)
+	parsed.Path = path.Join(parsed.Path, "/oidc/oauth2/token")
+	// httpReq, err := http.NewRequest("POST", conf.Url+"/oidc/oauth2/token", strings.NewReader(data.Encode()))
+	httpReq, err := http.NewRequest("POST", parsed.String(), strings.NewReader(data.Encode()))
 	if err != nil {
 		return true, err
 	}
@@ -123,6 +126,7 @@ func RefreshIfRequired(conf *cells_sdk.SdkConfig) (bool, error) {
 		bb, _ := ioutil.ReadAll(res.Body)
 		return true, fmt.Errorf("received status code %d - %s", res.StatusCode, string(bb))
 	}
+
 	defer res.Body.Close()
 	var respMap tokenResponse
 	err = json.NewDecoder(res.Body).Decode(&respMap)
@@ -132,6 +136,6 @@ func RefreshIfRequired(conf *cells_sdk.SdkConfig) (bool, error) {
 	conf.IdToken = respMap.AccessToken
 	conf.RefreshToken = respMap.RefreshToken
 	conf.TokenExpiresAt = int(time.Now().Unix()) + respMap.ExpiresIn
-	// fmt.Printf("Retrieved new token that will be refeshed at %v\n", time.Unix(int64(conf.TokenExpiresAt), 0))
+	// fmt.Printf("Retrieved new token that will be refreshed at %v\n", time.Unix(int64(conf.TokenExpiresAt), 0))
 	return true, nil
 }
