@@ -155,7 +155,7 @@ func interactive(currentList *rest.ConfigList) (newConf *rest.CecConfig, label s
 	}
 	pLabel := promptui.Select{Label: fmt.Sprintf("Would you like to use this default label - %s", bold.Sprint(label)), Items: []string{"Yes", "No"}, Size: 2}
 	if _, y, err := pLabel.Run(); y == "No" && err == nil {
-		p5 := promptui.Prompt{Label: "Enter the new label for the config"}
+		p5 := promptui.Prompt{Label: "Enter the new label for the config", Validate: notEmpty}
 		label, err = p5.Run()
 		if err != nil {
 			log.Fatal(err)
@@ -168,7 +168,10 @@ func interactive(currentList *rest.ConfigList) (newConf *rest.CecConfig, label s
 func nonInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, label string, err error) {
 
 	newConf = &rest.CecConfig{}
-
+	// if label is empty (in case the flag is used without a value)
+	if label == "" {
+		label = "default"
+	}
 	label = configLabel
 	newConf.Url = configHost
 	newConf.User = configUser
@@ -233,7 +236,7 @@ func validUrl(input string) error {
 
 func notEmpty(input string) error {
 	if len(input) == 0 {
-		return fmt.Errorf("Field cannot be empty")
+		return fmt.Errorf("field cannot be empty")
 	}
 	return nil
 }
