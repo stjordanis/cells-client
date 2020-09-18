@@ -28,13 +28,18 @@ Displays the current active config, show the users and the cells instance
 		}
 		active := list.GetActiveConfig()
 
+		username := active.TokenUser
+		if active.TokenUser == "" {
+			username = active.User
+		}
+
 		if jsonFormat {
 			type info struct {
 				User string `json:"user"`
 				URL  string `json:"url"`
 			}
 			activeConfig := &info{
-				User: active.TokenUser,
+				User: username,
 				URL:  active.Url,
 			}
 
@@ -45,7 +50,7 @@ Displays the current active config, show the users and the cells instance
 
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader([]string{"Login", "URL"})
-		table.Append([]string{active.TokenUser, active.Url})
+		table.Append([]string{username, active.Url})
 		table.Render()
 
 	},
