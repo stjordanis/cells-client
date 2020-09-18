@@ -74,9 +74,6 @@ func GetApiClient(anonymous ...bool) (context.Context, *client.PydioCellsRest, e
 	if len(anonymous) > 0 && anonymous[0] {
 		anon = true
 	}
-	if DefaultConfig.IdToken == "" || DefaultConfig.RefreshToken == "" {
-		return nil, nil, fmt.Errorf("refresh length[%d] or id token length[%d] are empty", len(DefaultConfig.RefreshToken), len(DefaultConfig.IdToken))
-	}
 	DefaultConfig.CustomHeaders = map[string]string{"User-Agent": "cells-client/" + common.Version}
 	c, t, e := transport.GetRestClientTransport(&DefaultConfig.SdkConfig, anon)
 	if e != nil {
@@ -111,7 +108,7 @@ func SetUpEnvironment(confPath string) error {
 
 	l, err := GetConfigList()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	if c.Url == "" {
@@ -126,7 +123,7 @@ func SetUpEnvironment(confPath string) error {
 		// Refresh token if required
 		if refreshed, err := RefreshIfRequired(cecCfg); refreshed {
 			if err != nil {
-				log.Fatal("Could not refresh authentication token:", err)
+				return fmt.Errorf("could not refresh the authentication token: %v", err)
 			}
 			// Copy config as IdToken will be cleared and kept inside the keyring
 			var storeConfig CecConfig
@@ -219,35 +216,4 @@ func getS3ConfigFromSdkConfig(sConf cells_sdk.SdkConfig) cells_sdk.S3Config {
 	c.Region = "us-east-1"
 	c.Endpoint = sConf.Url
 	return c
-}
-
-// GetConfigList retrieves the current configurations stored in the config.json file
-func GetConfigList() (*ConfigList, error) {
-	// assuming they are located in the default folder
-	data, err := ioutil.ReadFile(GetConfigFilePath())
-	if err != nil {
-		return nil, err
-	}
-
-	cfg := &ConfigList{}
-	err = json.Unmarshal(data, cfg)
-	if err == nil {
-		return cfg, nil
-	}
-
-	var oldConf *cells_sdk.SdkConfig
-	if err = json.Unmarshal(data, &oldConf); err != nil {
-		return nil, fmt.Errorf("unknown config format: %s", err)
-	}
-	// cfg = new(ConfigList)
-	defaultLabel := "default"
-	cfg.ActiveConfig = defaultLabel
-	cfg = &ConfigList{
-		Configs: map[string]*CecConfig{"default": {
-			SdkConfig: *oldConf,
-		}},
-		ActiveConfig: defaultLabel,
-	}
-
-	return cfg, nil
 }
