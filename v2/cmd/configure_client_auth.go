@@ -1,18 +1,16 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"strings"
 
+	"github.com/fatih/color"
 	"github.com/manifoldco/promptui"
 	"github.com/micro/go-log"
 	"github.com/spf13/cobra"
 
 	"github.com/pydio/cells-client/v2/rest"
-	cells_sdk "github.com/pydio/cells-sdk-go"
 )
 
 const authTypeClientAuth = "client-auth"
@@ -21,6 +19,7 @@ var (
 	configHost       string
 	configUser       string
 	configPwd        string
+	configLabel      string
 	configSkipVerify bool
 )
 
@@ -41,10 +40,15 @@ You can also go through the whole process in a non-interactive manner by using t
 		var err error
 		newConf := &rest.CecConfig{}
 
+		list, err := rest.GetConfigList()
+		if err != nil {
+			list = &rest.ConfigList{Configs: map[string]*rest.CecConfig{}}
+		}
+
 		if notEmpty(configHost) == nil && notEmpty(configUser) == nil && notEmpty(configPwd) == nil {
-			err = nonInteractive(&newConf.SdkConfig)
+			newConf, label, err = nonInteractive(list)
 		} else {
-			err = interactive(&newConf.SdkConfig)
+			newConf, label, err = interactive(list)
 		}
 		if err != nil {
 			log.Fatal(err)
@@ -56,31 +60,34 @@ You can also go through the whole process in a non-interactive manner by using t
 				fmt.Println(promptui.IconWarn + " Cannot save token in keyring! " + err.Error())
 			}
 		}
-		filePath := rest.GetConfigFilePath()
-		data, _ := json.MarshalIndent(newConf, "", "\t")
-		err = ioutil.WriteFile(filePath, data, 0600)
-		if err != nil {
+
+		if err := list.Add(label, newConf); err != nil {
+			log.Fatal(err)
+		}
+
+		if err := list.SaveConfigFile(); err != nil {
 			fmt.Println(promptui.IconBad + " Cannot save configuration file! " + err.Error())
 		} else {
+			fmt.Printf("%s Configuration saved under label %s\n", promptui.IconGood, color.New(color.Bold).Sprint(label))
 			fmt.Printf("%s Configuration saved, you can now use the client to interact with %s.\n", promptui.IconGood, newConf.Url)
 		}
 	},
 }
 
-func interactive(newConf *cells_sdk.SdkConfig) error {
+func interactive(currentList *rest.ConfigList) (newConf *rest.CecConfig, label string, err error) {
 
 	var e error
-
+	newConf = &rest.CecConfig{}
 	// PROMPT URL
 	p := promptui.Prompt{Label: "Server Address (provide a valid URL)", Validate: validUrl}
 	if newConf.Url, e = p.Run(); e != nil {
-		return e
+		return newConf, label, e
 	}
-	newConf.Url = strings.Trim(newConf.Url, " ")
+	newConf.Url = strings.TrimSpace(newConf.Url)
 
 	u, e := url.Parse(newConf.Url)
 	if e != nil {
-		return e
+		return nil, label, e
 	}
 
 	if u.Scheme == "https" {
@@ -97,46 +104,117 @@ func interactive(newConf *cells_sdk.SdkConfig) error {
 		Validate: notEmpty,
 	}
 	if newConf.User, e = p.Run(); e != nil {
-		return e
+		return newConf, label, e
 	}
 
 	// PROMPT PASSWORD
 	p = promptui.Prompt{Label: "User Password", Mask: '*', Validate: notEmpty}
 	if newConf.Password, e = p.Run(); e != nil {
-		return e
+		return newConf, label, e
 	}
 
 	// Test a simple PING with this config before saving
 	fmt.Println(promptui.IconWarn + " Testing this configuration before saving")
-	rest.DefaultConfig.SdkConfig = *newConf
+	rest.DefaultConfig = newConf
 	if _, _, e := rest.GetApiClient(); e != nil {
 		fmt.Println("\r" + promptui.IconBad + " Could not connect to server, please recheck your configuration")
 		fmt.Println("Cause: " + e.Error())
-		return fmt.Errorf("test connection failed")
+		return newConf, label, fmt.Errorf("test connection failed")
 	}
 	fmt.Println("\r" + promptui.IconGood + " Successfully logged to server")
-	return nil
+	bold := color.New(color.Bold)
+
+	label = "default"
+
+	var found bool
+	if currentList != nil && currentList.Configs != nil {
+		for k, v := range currentList.Configs {
+			if v.Url == newConf.Url && v.TokenUser == newConf.TokenUser {
+				label = k
+				found = true
+				break
+			}
+		}
+		if !found {
+			var i int
+			for {
+				if i > 0 {
+					label = fmt.Sprintf("default-%d", i)
+				}
+				if _, ok := currentList.Configs[label]; !ok {
+					break
+				}
+				i++
+			}
+		}
+	}
+
+	// if a config with the same parameters (url and username) is found we return the same config for an update
+	if found {
+		return newConf, label, nil
+	}
+	pLabel := promptui.Select{Label: fmt.Sprintf("Would you like to use this default label - %s", bold.Sprint(label)), Items: []string{"Yes", "No"}, Size: 2}
+	if _, y, err := pLabel.Run(); y == "No" && err == nil {
+		p5 := promptui.Prompt{Label: "Enter the new label for the config"}
+		label, err = p5.Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	return newConf, label, nil
 }
 
-func nonInteractive(conf *cells_sdk.SdkConfig) error {
+func nonInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, label string, err error) {
 
-	conf.Url = configHost
-	conf.User = configUser
-	conf.Password = configPwd
-	conf.SkipVerify = configSkipVerify
+	newConf = &rest.CecConfig{}
+
+	label = configLabel
+	newConf.Url = configHost
+	newConf.User = configUser
+	newConf.Password = configPwd
+	newConf.SkipVerify = configSkipVerify
+
+	// if configuration with the same label exists put a default label
+	var found bool
+	if currentList != nil && currentList.Configs != nil {
+		for k, v := range currentList.Configs {
+			if v.Url == newConf.Url && v.User == newConf.User {
+				label = k
+				found = true
+				break
+			}
+		}
+		if !found {
+			var i int
+			for {
+				if i > 0 {
+					label = fmt.Sprintf("default-%d", i)
+				}
+				if _, ok := currentList.Configs[label]; !ok {
+					break
+				}
+				i++
+			}
+		}
+	}
+
+	if found {
+		return newConf, label, fmt.Errorf("A configuration with the same parameters already exists under the label [%s]", label)
+	}
 
 	// Insure values are legal
-	if err := validUrl(conf.Url); err != nil {
-		return fmt.Errorf("URL %s is not valid: %s", conf.Url, err.Error())
+	if err := validUrl(newConf.Url); err != nil {
+		return nil, "", fmt.Errorf("URL %s is not valid: %s", newConf.Url, err.Error())
 	}
 
 	// Test a simple ping with this config before saving
-	rest.DefaultConfig.SdkConfig = *conf
+	rest.DefaultConfig = newConf
 	if _, _, e := rest.GetApiClient(); e != nil {
-		return fmt.Errorf("Could not connect to newly configured server failed, cause: %s", e.Error())
+		return nil, "", fmt.Errorf("could not connect to newly configured server failed, cause: %s", e.Error())
 	}
 
-	return nil
+	return newConf, label, nil
 }
 
 func validUrl(input string) error {
@@ -167,6 +245,7 @@ func init() {
 	flags.StringVarP(&configHost, "url", "u", "", "HTTP URL to server")
 	flags.StringVarP(&configUser, "login", "l", "", "User login")
 	flags.StringVarP(&configPwd, "password", "p", "", "User password")
+	flags.StringVarP(&configLabel, "label", "", "default", "Configuration label")
 	flags.BoolVar(&configSkipVerify, "skipVerify", false, "Skip SSL certificate verification (not recommended)")
 
 	configureCmd.AddCommand(configureClientAuthCmd)
