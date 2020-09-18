@@ -274,7 +274,7 @@ func oAuthInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, la
 	}
 	p4 := promptui.Select{Label: fmt.Sprintf("Would you like to use this default label - %s", bold.Sprint(label)), Items: []string{"Yes", "No"}, Size: 2}
 	if _, y, err := p4.Run(); y == "No" && err == nil {
-		p5 := promptui.Prompt{Label: "Enter the new label for the config"}
+		p5 := promptui.Prompt{Label: "Enter the new label for the config", Validate: notEmpty}
 		label, err = p5.Run()
 		if err != nil {
 			log.Fatal(err)
