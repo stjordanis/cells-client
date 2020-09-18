@@ -120,7 +120,7 @@ func RandString(n int) string {
 	return string(b)
 }
 
-func oAuthInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, configLabel string, err error) {
+func oAuthInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, label string, err error) {
 	var e error
 	newConf = &rest.CecConfig{}
 	// PROMPT URL
@@ -133,7 +133,7 @@ func oAuthInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, co
 	if newConf.Url, e = p.Run(); e != nil {
 		return nil, "", e
 	} else {
-		newConf.Url = strings.Trim(newConf.Url, " ")
+		newConf.Url = strings.TrimSpace(newConf.Url)
 	}
 	u, e := url.Parse(newConf.Url)
 	if e != nil {
@@ -244,13 +244,13 @@ func oAuthInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, co
 	fmt.Println("\r"+promptui.IconGood+" "+"You are logged-in as user:", bold.Sprintf("%s", rest.CurrentUser))
 	newConf.TokenUser = rest.CurrentUser
 
-	configLabel = "default"
+	label = "default"
 
 	var found bool
 	if currentList != nil && currentList.Configs != nil {
 		for k, v := range currentList.Configs {
 			if v.Url == newConf.Url && v.TokenUser == newConf.TokenUser {
-				configLabel = k
+				label = k
 				found = true
 				break
 			}
@@ -259,9 +259,9 @@ func oAuthInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, co
 			var i int
 			for {
 				if i > 0 {
-					configLabel = fmt.Sprintf("default-%d", i)
+					label = fmt.Sprintf("default-%d", i)
 				}
-				if _, ok := currentList.Configs[configLabel]; !ok {
+				if _, ok := currentList.Configs[label]; !ok {
 					break
 				}
 				i++
@@ -270,29 +270,21 @@ func oAuthInteractive(currentList *rest.ConfigList) (newConf *rest.CecConfig, co
 	}
 
 	if found {
-		return newConf, configLabel, nil
+		return newConf, label, nil
 	}
-	p4 := promptui.Select{Label: fmt.Sprintf("Would you like to use this default label - %s", bold.Sprint(configLabel)), Items: []string{"Yes", "No"}, Size: 2}
+	p4 := promptui.Select{Label: fmt.Sprintf("Would you like to use this default label - %s", bold.Sprint(label)), Items: []string{"Yes", "No"}, Size: 2}
 	if _, y, err := p4.Run(); y == "No" && err == nil {
 		p5 := promptui.Prompt{Label: "Enter the new label for the config"}
-		configLabel, err = p5.Run()
+		label, err = p5.Run()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
 
-	return newConf, configLabel, nil
+	return newConf, label, nil
 }
 
-func isPortAvailable(port int, timeout int) bool {
-	conn, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
-}
-
+// TODO finish integration of this mode
 func oAuthNonInteractive(currentList *rest.ConfigList) (conf *rest.CecConfig, label string, err error) {
 	conf = &rest.CecConfig{}
 	conf.Url = oAuthUrl
@@ -311,8 +303,42 @@ func oAuthNonInteractive(currentList *rest.ConfigList) (conf *rest.CecConfig, la
 		err = fmt.Errorf("test connection to newly configured server failed")
 		return
 	}
+
+	label = "default"
+	var found bool
+	if currentList != nil && currentList.Configs != nil {
+		for k, v := range currentList.Configs {
+			if v.Url == conf.Url && v.User == conf.TokenUser {
+				label = k
+				found = true
+				break
+			}
+		}
+		if !found {
+			var i int
+			for {
+				if i > 0 {
+					label = fmt.Sprintf("default-%d", i)
+				}
+				if _, ok := currentList.Configs[label]; !ok {
+					break
+				}
+				i++
+			}
+		}
+	}
+
 	conf.User = rest.CurrentUser
 	return
+}
+
+func isPortAvailable(port int, timeout int) bool {
+	conn, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func init() {
