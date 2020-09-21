@@ -2,9 +2,7 @@ package rest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -152,6 +150,11 @@ func RefreshAndStoreIfRequired(c *CecConfig) bool {
 	refreshMux.Lock()
 	defer refreshMux.Unlock()
 
+	list, err := GetConfigList()
+	if err != nil {
+		log.Fatal("could not refresh token:", err)
+	}
+
 	refreshed, err := RefreshIfRequired(c)
 	if err != nil {
 		log.Fatal("Could not refresh authentication token:", err)
@@ -159,10 +162,10 @@ func RefreshAndStoreIfRequired(c *CecConfig) bool {
 	if refreshed {
 		// Copy config as IdToken will be cleared
 		storeConfig := *c
-		ConfigToKeyring(&storeConfig)
-		// Save config to renew TokenExpireAt
-		confData, _ := json.MarshalIndent(&storeConfig, "", "\t")
-		ioutil.WriteFile(GetConfigFilePath(), confData, 0600)
+		_ = ConfigToKeyring(&storeConfig)
+		list.updateActiveConfig(&storeConfig)
+		// // Save config to renew TokenExpireAt
+		_ = list.SaveConfigFile()
 	}
 
 	return refreshed
