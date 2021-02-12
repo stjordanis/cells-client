@@ -192,8 +192,6 @@ func (c *CrawlNode) MkdirAll(dd []*CrawlNode, pool *BarsPool) error {
 		if c.IsLocal {
 			if e := os.MkdirAll(newFolder, 0755); e != nil {
 				return e
-			} else {
-				pool.Done()
 			}
 		} else {
 			mm = append(mm, &models.TreeNode{Path: newFolder, Type: models.TreeNodeTypeCOLLECTION})
