@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/pydio/cells-sdk-go"
+	cells_sdk "github.com/pydio/cells-sdk-go"
 )
 
 type ConfigList struct {

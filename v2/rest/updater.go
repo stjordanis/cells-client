@@ -133,7 +133,9 @@ func LoadUpdates(ctx context.Context) ([]*UpdatePackage, error) {
 		myClient = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyUrl)}}
 	}
 	response, err = myClient.Do(postRequest)
-
+	if err != nil {
+		return nil, err
+	}
 	if response.StatusCode != 200 {
 		rErr := fmt.Errorf("could not connect to the update server, error code was %d", response.StatusCode)
 		if response.StatusCode == 500 {
@@ -223,11 +225,8 @@ func ApplyUpdate(ctx context.Context, p *UpdatePackage, dryRun bool, pgChan chan
 		}
 		// backupFile := targetPath + "-" + common.Version + "-rev-" + common.BuildStamp
 
-		defaultConfPath := DefaultConfigFilePath()
-		backupFile := filepath.Join(filepath.Dir(defaultConfPath), "cec-"+common.Version+"-"+common.BuildStamp)
-
 		defaultConfPath := defaultConfigFilePath()
-		backupFile := filepath.Join(filepath.Dir(defaultConfPath), "cec-rev-"+common.Version)
+		backupFile := filepath.Join(filepath.Dir(defaultConfPath), "cec-"+common.Version+"-"+common.BuildStamp)
 		reader := net.BodyWithProgressMonitor(resp, pgChan, nil)
 
 		er := update2.Apply(reader, update2.Options{

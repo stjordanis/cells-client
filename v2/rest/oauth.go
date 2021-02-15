@@ -21,6 +21,8 @@ type tokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+var CurrentUser string
+
 // OAuthPrepareUrl makes a URL that can be opened in browser or copy/pasted by user
 func OAuthPrepareUrl(serverUrl, clientId, clientSecret, state string, browser bool) (redirectUrl string, callbackUrl string, e error) {
 
@@ -62,7 +64,7 @@ func OAuthExchangeCode(c *CecConfig, code, callbackUrl string) error {
 	if c.SkipVerify {
 		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
-	resp, err := http.Post(tokenU.String(), "application/x-www-form-urlencoded", strings.NewReader(values.Encode()))
+	resp, err := http.Post(tokenURL.String(), "application/x-www-form-urlencoded", strings.NewReader(values.Encode()))
 	if err != nil {
 		return err
 	}
@@ -71,6 +73,14 @@ func OAuthExchangeCode(c *CecConfig, code, callbackUrl string) error {
 	if err := json.Unmarshal(b, &r); err != nil {
 		return err
 	}
+
+	t, _ := jwt.ParseSigned(r.IdToken)
+	var claims map[string]interface{}
+	_ = t.UnsafeClaimsWithoutVerification(&claims)
+	if name, ok := claims["name"]; ok {
+		CurrentUser = name.(string)
+	}
+
 	c.IdToken = r.AccessToken
 	c.RefreshToken = r.RefreshToken
 	c.TokenExpiresAt = int(time.Now().Unix()) + r.ExpiresIn
